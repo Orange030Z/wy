@@ -32,14 +32,18 @@ def process_region(code, name):
         if res.status_code == 200:
             lines = [l.strip() for l in res.text.splitlines() if "#" in l]
             for index, line in enumerate(lines):
+                if "#" not in line: continue
                 addr, _ = line.split("#")
                 if ":" not in addr: continue
                 ip, port = addr.split(":")
+                
                 if check_ip_port(ip, port):
                     node_name = f"{name} {str(index + 1).zfill(2)}{SUFFIX}"
                     path = f"/{ip}:{port}"
-                    # 构造节点字典
-                    node_info = {
+                    # 构造 VLESS 链接
+                    vless_link = f"vless://{UUID}@{ip}:{port}?encryption=none&security=tls&sni={HOST}&type=ws&host={HOST}&path={path}#{node_name}"
+                    
+                    nodes_data.append({
                         "name": node_name,
                         "type": "vless",
                         "server": ip,
@@ -50,11 +54,9 @@ def process_region(code, name):
                         "udp": True,
                         "servername": HOST,
                         "network": "ws",
-                        "ws-opts": {"path": path, "headers": {"Host": HOST}}
-                    }
-                    # 构造分享链接供 sub.txt 使用
-                    node_info["raw_url"] = f"vless://{UUID}@{ip}:{port}?encryption=none&security=tls&sni={HOST}&type=ws&host={HOST}&path={path}#{node_name}"
-                    nodes_data.append(node_info)
+                        "ws-opts": {"path": path, "headers": {"Host": HOST}},
+                        "raw_url": vless_link # 确保这里一定有这个键
+                    })
     except:
         pass
     return nodes_data
@@ -75,18 +77,21 @@ def main():
     }
 
     all_proxies = []
-    print(f"开始抓取所有地区...")
+    print(f"正在全量抓取 {len(region_map)} 个地区...")
+    
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_region, c, n) for c, n in region_map.items()]
         for future in as_completed(futures):
             all_proxies.extend(future.result())
 
     if not all_proxies:
-        print("未抓取到可用节点")
+        print("未抓取到有效节点")
         return
 
-    # 生成配置文件字典（模仿 suiyuan8 config3）
-    config = {
+    all_proxies.sort(key=lambda x: x['name'])
+
+    # 构造 Clash 配置
+    clash_config = {
         "global-ua": "clash.meta",
         "mixed-port": 7890,
         "allow-lan": True,
@@ -95,12 +100,14 @@ def main():
         "ipv6": False,
         "dns": {
             "enable": True, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
-            "nameserver": ["https://doh.pub/dns-query", "https://223.5.5.5/dns-query"]
+            "nameserver": ["https://doh.pub/dns-query", "https://223.5.5.5/dns-query"],
+            "fallback": ["8.8.8.8", "1.1.1.1"]
         },
-        "proxies": all_proxies,
+        "proxies": [{"name": "🟢 直连", "type": "direct", "udp": True}] + all_proxies,
         "proxy-groups": [
-            {"name": "🚀 节点选择", "type": "select", "proxies": ["♻️ 自动选择", "🌐 全部节点", "🇭🇰 香港节点", "🇺🇲 美国节点"]},
+            {"name": "🚀 节点选择", "type": "select", "proxies": ["♻️ 自动选择", "☢ 负载均衡-散列", "🌐 全部节点", "🇭🇰 香港节点", "🇺🇲 美国节点", "🟢 直连"]},
             {"name": "♻️ 自动选择", "type": "url-test", "include-all": True, "url": "http://www.gstatic.com/generate_204", "interval": 300},
+            {"name": "☢ 负载均衡-散列", "type": "load-balance", "strategy": "consistent-hashing", "include-all": True, "interval": 180},
             {"name": "🌐 全部节点", "type": "select", "include-all": True},
             {"name": "🇭🇰 香港节点", "type": "url-test", "include-all": True, "filter": "香港|HK"},
             {"name": "🇺🇲 美国节点", "type": "url-test", "include-all": True, "filter": "美国|US"}
@@ -108,16 +115,19 @@ def main():
         "rules": ["MATCH,🚀 节点选择"]
     }
 
-    # 写入文件
+    # 导出 Clash 配置
     with open("clash.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, sort_keys=False)
+        yaml.dump(clash_config, f, allow_unicode=True, sort_keys=False)
     
-    # 写入 sub.txt (修复了 raw_url 引用问题)
-    raw_urls = [n['raw_url'] for n in all_proxies]
-    with open("sub.txt", "w", encoding="utf-8") as f:
-        f.write(base64.b64encode("\n".join(raw_urls).encode()).decode())
-    
-    print(f"成功生成！共计 {len(all_proxies)} 个节点")
+    # 安全导出 sub.txt 和 nodes.txt (增加 .get 保护)
+    raw_urls = [n.get('raw_url') for n in all_proxies if n.get('raw_url')]
+    if raw_urls:
+        with open("nodes.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(raw_urls))
+        with open("sub.txt", "w", encoding="utf-8") as f:
+            f.write(base64.b64encode("\n".join(raw_urls).encode("utf-8")).decode("utf-8"))
+
+    print(f"成功完成！共抓取 {len(all_proxies)} 个节点。")
 
 if __name__ == "__main__":
     main()
