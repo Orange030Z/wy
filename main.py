@@ -9,8 +9,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- [配置区] ---
-UUID = os.getenv("MY_UUID", "3afad5df-e056-4301-846d-665b4ef51968")
-HOST = os.getenv("MY_HOST", "x.kkii.eu.org")
+UUID = os.getenv("MY_UUID", "5a2c16f9-e365-4080-8d38-6924c3835586")
+HOST = os.getenv("MY_HOST", "snippets.kkii.eu.org")
 MAX_WORKERS = 30 
 SUFFIX = " @schpd_chat"
 
