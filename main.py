@@ -12,7 +12,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 UUID = os.getenv("MY_UUID", "3afad5df-e056-4301-846d-665b4ef51968")
 HOST = os.getenv("MY_HOST", "x.kkii.eu.org")
 MAX_WORKERS = 30 
-SUFFIX = " @Orange"
+SUFFIX = " @schpd_chat"
 
 def check_ip_port(ip, port):
     try:
