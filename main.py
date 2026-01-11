@@ -17,7 +17,7 @@ SUFFIX = " @Orange"
 def check_ip_port(ip, port):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.6) # 缩短检测时间，防止 Actions 超时
+        s.settimeout(0.5)
         result = s.connect_ex((ip, int(port)))
         s.close()
         return result == 0
@@ -33,10 +33,13 @@ def process_region(code, name):
             lines = [l.strip() for l in res.text.splitlines() if "#" in l]
             for index, line in enumerate(lines):
                 addr, _ = line.split("#")
+                if ":" not in addr: continue
                 ip, port = addr.split(":")
                 if check_ip_port(ip, port):
                     node_name = f"{name} {str(index + 1).zfill(2)}{SUFFIX}"
-                    nodes_data.append({
+                    path = f"/{ip}:{port}"
+                    # 构造节点字典
+                    node_info = {
                         "name": node_name,
                         "type": "vless",
                         "server": ip,
@@ -47,14 +50,16 @@ def process_region(code, name):
                         "udp": True,
                         "servername": HOST,
                         "network": "ws",
-                        "ws-opts": {"path": f"/{ip}:{port}", "headers": {"Host": HOST}}
-                    })
+                        "ws-opts": {"path": path, "headers": {"Host": HOST}}
+                    }
+                    # 构造分享链接供 sub.txt 使用
+                    node_info["raw_url"] = f"vless://{UUID}@{ip}:{port}?encryption=none&security=tls&sni={HOST}&type=ws&host={HOST}&path={path}#{node_name}"
+                    nodes_data.append(node_info)
     except:
         pass
     return nodes_data
 
 def main():
-    # 完整 50+ 地区
     region_map = {
         "HK": "香港", "TW": "台湾", "JP": "日本", "KR": "韩国", "SG": "新加坡",
         "MY": "马来西亚", "TH": "泰国", "VN": "越南", "ID": "印尼", "PH": "菲律宾",
@@ -70,17 +75,17 @@ def main():
     }
 
     all_proxies = []
-    print(f"正在全量检测 {len(region_map)} 个地区的节点...")
+    print(f"开始抓取所有地区...")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_region, c, n) for c, n in region_map.items()]
         for future in as_completed(futures):
             all_proxies.extend(future.result())
 
     if not all_proxies:
-        print("抓取失败")
+        print("未抓取到可用节点")
         return
 
-    # --- [suiyuan8 config3 结构注入] ---
+    # 生成配置文件字典（模仿 suiyuan8 config3）
     config = {
         "global-ua": "clash.meta",
         "mixed-port": 7890,
@@ -88,38 +93,31 @@ def main():
         "mode": "rule",
         "log-level": "info",
         "ipv6": False,
-        "sniffer": {"enable": True, "sniff": {"HTTP": {"ports": [80, "8080-8880"], "override-destination": True}, "TLS": {"ports": [443, 8443]}, "QUIC": {"ports": [443, 8443]}}},
-        "tun": {"enable": True, "stack": "mixed", "auto-route": True, "auto-detect-interface": True},
         "dns": {
-            "enable": True, "listen": "0.0.0.0:53", "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
-            "nameserver": ["https://doh.pub/dns-query", "https://223.5.5.5/dns-query"],
-            "fallback": ["8.8.8.8", "1.1.1.1"]
+            "enable": True, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
+            "nameserver": ["https://doh.pub/dns-query", "https://223.5.5.5/dns-query"]
         },
-        "proxies": [{"name": "🟢 直连", "type": "direct"}] + all_proxies,
+        "proxies": all_proxies,
         "proxy-groups": [
-            {"name": "🚀 节点选择", "type": "select", "proxies": ["♻️ 自动选择", "☢ 负载均衡-散列", "🌐 全部节点", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡", "🇰🇷 韩国", "🇺🇲 美国节点", "🟢 直连"]},
+            {"name": "🚀 节点选择", "type": "select", "proxies": ["♻️ 自动选择", "🌐 全部节点", "🇭🇰 香港节点", "🇺🇲 美国节点"]},
             {"name": "♻️ 自动选择", "type": "url-test", "include-all": True, "url": "http://www.gstatic.com/generate_204", "interval": 300},
-            {"name": "☢ 负载均衡-散列", "type": "load-balance", "include-all": True, "strategy": "consistent-hashing", "url": "http://www.gstatic.com/generate_204", "interval": 180},
             {"name": "🌐 全部节点", "type": "select", "include-all": True},
-            # 地区分组过滤
             {"name": "🇭🇰 香港节点", "type": "url-test", "include-all": True, "filter": "香港|HK"},
-            {"name": "🇹🇼 台湾节点", "type": "url-test", "include-all": True, "filter": "台湾|TW"},
-            {"name": "🇯🇵 日本节点", "type": "url-test", "include-all": True, "filter": "日本|JP"},
-            {"name": "🇸🇬 新加坡", "type": "url-test", "include-all": True, "filter": "新加坡|SG"},
-            {"name": "🇰🇷 韩国", "type": "url-test", "include-all": True, "filter": "韩国|KR"},
-            {"name": "🇺🇲 美国节点", "type": "url-test", "include-all": True, "filter": "美国|US"},
-            {"name": "🧿 其它地区", "type": "select", "include-all": True, "filter": "^((?!(香港|台湾|日本|新加坡|韩国|美国)).)*$"}
+            {"name": "🇺🇲 美国节点", "type": "url-test", "include-all": True, "filter": "美国|US"}
         ],
-        "rule-providers": {
-            "ai_ip": {"type": "http", "interval": 86400, "behavior": "ipcidr", "format": "mrs", "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip/ai.mrs"},
-            "cn_domain": {"type": "http", "interval": 86400, "behavior": "domain", "format": "mrs", "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs"}
-        },
-        "rules": [
-            "RULE-SET,ai_ip,🚀 节点选择",
-            "RULE-SET,cn_domain,DIRECT",
-            "MATCH,🚀 节点选择"
-        ]
+        "rules": ["MATCH,🚀 节点选择"]
     }
 
+    # 写入文件
     with open("clash.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(config, f
+        yaml.dump(config, f, allow_unicode=True, sort_keys=False)
+    
+    # 写入 sub.txt (修复了 raw_url 引用问题)
+    raw_urls = [n['raw_url'] for n in all_proxies]
+    with open("sub.txt", "w", encoding="utf-8") as f:
+        f.write(base64.b64encode("\n".join(raw_urls).encode()).decode())
+    
+    print(f"成功生成！共计 {len(all_proxies)} 个节点")
+
+if __name__ == "__main__":
+    main()
